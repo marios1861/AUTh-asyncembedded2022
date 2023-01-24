@@ -1,9 +1,12 @@
 use clap::Parser;
-use futures::stream::{StreamExt, iter};
 use futures::sink::SinkExt;
+use futures::stream::{iter, StreamExt};
 use serde_json as json;
 use tokio;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio::net::TcpStream;
+use tokio_tungstenite::{
+    connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+};
 use url::Url;
 
 #[derive(Parser)]
@@ -45,8 +48,14 @@ async fn main() {
     let mut messages_iter = iter(requests.into_iter().map(Ok));
     ws_stream.send_all(&mut messages_iter).await.unwrap();
 
+    task1(&mut ws_stream).await;
+
+}
+
+async fn task1(ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) {
     while let Some(Ok(msg)) = ws_stream.next().await {
-        let parsed: json::Value = json::from_str(&msg.into_text().unwrap()).expect("Can't parse JSON!");
+        let parsed: json::Value =
+            json::from_str(&msg.into_text().unwrap()).expect("Can't parse JSON!");
         println!("Received message: {:?}", parsed);
     }
 }
