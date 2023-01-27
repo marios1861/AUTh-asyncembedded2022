@@ -1,8 +1,9 @@
-use serde::Serialize;
-use serde_json as json;
 use tokio::fs::File;
 use tokio::io;
 use tokio::io::AsyncWriteExt;
+
+use serde::Serialize;
+use serde_json as json;
 
 #[derive(Serialize)]
 pub struct Candlestick {
@@ -38,6 +39,7 @@ impl Candlestick {
     }
 
     pub async fn save(&self, file: &mut File) -> io::Result<()> {
-        file.write_all(json::to_string(self)?.as_bytes()).await
+        file.write_all((json::to_string(self)? + "\n").as_bytes())
+            .await
     }
 }

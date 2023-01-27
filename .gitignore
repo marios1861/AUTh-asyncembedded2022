@@ -6,3 +6,4 @@
 **/*.rs.bk
 
 /data
+/aarch64-linux-musl-cross

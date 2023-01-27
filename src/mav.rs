@@ -1,10 +1,12 @@
-use json::Value;
-use serde::Serialize;
-use serde_json as json;
 use std::collections::VecDeque;
+
 use tokio::fs::File;
 use tokio::io;
 use tokio::io::AsyncWriteExt;
+
+use json::Value;
+use serde::Serialize;
+use serde_json as json;
 
 #[derive(Serialize)]
 struct MovingAverageData {
@@ -57,10 +59,12 @@ impl MovingAverage {
     }
 
     pub fn update(&mut self, data: &Vec<&Value>) -> Option<()> {
+        let last_val = self.mav_vals.front()?.clone();
         let new_avg = Self::price_avg(data);
+        self.mav_vals.pop_back();
         self.mav_vals.push_front(new_avg);
-        let last_val = self.mav_vals.front()?;
         self.mav_avg = self.mav_avg + (new_avg - last_val) / self.capacity as f64;
+        self.vols.pop_back();
         self.vols.push_front(Self::vol_sum(data));
         Some(())
     }
@@ -73,7 +77,7 @@ impl MovingAverage {
     }
 
     pub async fn save(&self, file: &mut File) -> io::Result<()> {
-        file.write_all(json::to_string(&Self::get_writable(&self))?.as_bytes())
+        file.write_all((json::to_string(&Self::get_writable(&self))? + "\n").as_bytes())
             .await
     }
 }
