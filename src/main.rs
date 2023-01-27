@@ -3,8 +3,8 @@ use std::path::Path;
 
 use tokio;
 use tokio::fs;
-use tokio::sync::broadcast::error::TryRecvError;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::time::Instant;
 
 use clap::Parser;
@@ -97,11 +97,11 @@ async fn main() {
     let (tx1, mut rx1): (
         Sender<(String, Candlestick)>,
         Receiver<(String, Candlestick)>,
-    ) = broadcast::channel(600);
+    ) = mpsc::channel(600);
     let (tx2, mut rx2): (
         Sender<(String, MovingAverageData)>,
         Receiver<(String, MovingAverageData)>,
-    ) = broadcast::channel(600);
+    ) = mpsc::channel(600);
 
     // Create tokio tasks for each task of the application
     // two tasks are automatically scheduled to execute at
@@ -114,7 +114,7 @@ async fn main() {
             interval1.tick().await;
             // create a Vec that can hold the amount of rx1 we haven't received yet
 
-            let mut tot_data: Vec<(String, Candlestick)> = Vec::with_capacity(rx1.len());
+            let mut tot_data: Vec<(String, Candlestick)> = Vec::new();
             // collect all the values we have received
             while let Ok(value) = rx1.try_recv().map_err(|err| {
                 if err != TryRecvError::Empty {
@@ -160,7 +160,7 @@ async fn main() {
             interval2.tick().await;
             // create a Vec that can hold the amount of rx1 we haven't received yet
 
-            let mut tot_data: Vec<(String, MovingAverageData)> = Vec::with_capacity(rx2.len());
+            let mut tot_data: Vec<(String, MovingAverageData)> = Vec::new();
             // collect all the values we have received
             while let Ok(value) = rx2.try_recv().map_err(|err| {
                 if err != TryRecvError::Empty {

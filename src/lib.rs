@@ -12,7 +12,7 @@ use mav::MovingAverageData;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{interval, interval_at, Instant, Interval};
-use tokio::{fs, net::TcpStream, sync::broadcast::Sender};
+use tokio::{fs, net::TcpStream, sync::mpsc::Sender};
 
 use serde_json::{from_str, json, Value};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -113,11 +113,13 @@ pub async fn task1(
                         Candlestick::new(data_all[symbol].to_owned()).expect("Bad data");
                     channel1
                         .send((symbol.to_owned(), candlestick))
+                        .await
                         .expect("Could not send candlestick!");
 
                     let mavdata = MovingAverageData::new(data_all[symbol].to_owned());
                     channel2
                         .send((symbol.to_owned(), mavdata))
+                        .await
                         .expect("Could not send moving average!");
                 }
             } else {
