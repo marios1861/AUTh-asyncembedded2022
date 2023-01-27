@@ -3,15 +3,17 @@ use std::path::Path;
 
 use tokio;
 use tokio::fs;
+use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::time::Instant;
 
 use clap::Parser;
-use serde_json as json;
 
 use asyncembedded2022::candlestick::Candlestick;
-use asyncembedded2022::mav::MovingAverage;
-use asyncembedded2022::{get_socket, minute_interval, subscribe_to_symbols, symbol_data, task1, write_delay};
-use tokio::time::Instant;
+use asyncembedded2022::mav::{MovingAverage, MovingAverageData};
+use asyncembedded2022::{
+    data_from_channel, get_socket, minute_interval, subscribe_to_symbols, task1, write_delay,
+};
 
 #[derive(Parser)]
 #[command(author = "Mariano N. <marios1861@gmail.com>")]
@@ -90,26 +92,20 @@ async fn main() {
         );
     }
 
-    // Create a channel to send symbol data to the processing tasks
-    // The channel has a hard cap on capacity
-    // The trades per minute for each symbol are not known
-    // For apple, the trades in 2022 were about 240 per minute, on average
-    // We approximate this with a cap of 300 trades, per symbol
-    // This is the most important memory consumption of the application
-    let (tx, mut rx1): (Sender<json::Value>, Receiver<json::Value>) =
-        broadcast::channel(300 * cli.symbols.len());
-    let mut rx2 = tx.subscribe();
+    // We have put a limiter in task1 which doesn't allow for more than 600 batches of data to received
+    // per minute. Each batch can contain many data points
+    let (tx1, mut rx1): (
+        Sender<(String, Candlestick)>,
+        Receiver<(String, Candlestick)>,
+    ) = broadcast::channel(600);
+    let (tx2, mut rx2): (
+        Sender<(String, MovingAverageData)>,
+        Receiver<(String, MovingAverageData)>,
+    ) = broadcast::channel(600);
 
     // Create tokio tasks for each task of the application
-    // loop over the task1 function
-    // which attempts to read the stream until it is empty every time it is called
-    // in the meanwhile, the other two tasks are automatically scheduled to execute at
-    // the soonest possible moment
-    let task = tokio::spawn(async move {
-        loop {
-            task1(&mut ws_stream, &tx, &mut raw_data).await.unwrap();
-        }
-    });
+    // two tasks are automatically scheduled to execute at
+    // the soonest possible moment from the interval tick
 
     // Candlestick generator task (task2)
     let task2_symbols = cli.symbols.clone();
@@ -118,20 +114,23 @@ async fn main() {
             interval1.tick().await;
             // create a Vec that can hold the amount of rx1 we haven't received yet
 
-            
-            let mut tot_data: Vec<json::Value> = Vec::with_capacity(rx1.len());
+            let mut tot_data: Vec<(String, Candlestick)> = Vec::with_capacity(rx1.len());
             // collect all the values we have received
-            while let Ok(value) = rx1.try_recv() {
+            while let Ok(value) = rx1.try_recv().map_err(|err| {
+                if err != TryRecvError::Empty {
+                    println!("Task 2: channel: {err}"); // print actual important errors (it always ends with the "Empty" error)
+                }
+            }) {
                 tot_data.push(value);
             }
-            
+
             if tot_data.len() == 0 {
+                println!("Skipped!");
                 continue;
             }
 
-            
-            let data_all = symbol_data(&tot_data, &task2_symbols);
-            
+            let data_all = data_from_channel(&tot_data, &task2_symbols);
+
             for symbol in &task2_symbols {
                 let file = candles.get_mut(symbol).unwrap();
                 let data = data_all.get(symbol).unwrap();
@@ -140,7 +139,7 @@ async fn main() {
                 let start = Instant::now();
 
                 let new_candlestick =
-                    Candlestick::new(data).expect("Could not generate candlestick!");
+                    Candlestick::combine(data.to_owned()).expect("Could not generate candlestick!");
                 new_candlestick.save(file).await.unwrap();
 
                 write_delay(start, &mut delays2).await.unwrap();
@@ -160,21 +159,23 @@ async fn main() {
         loop {
             interval2.tick().await;
             // create a Vec that can hold the amount of rx1 we haven't received yet
-            
-            
-            let mut tot_data: Vec<json::Value> = Vec::with_capacity(rx2.len());
+
+            let mut tot_data: Vec<(String, MovingAverageData)> = Vec::with_capacity(rx2.len());
             // collect all the values we have received
-            while let Ok(value) = rx2.try_recv() {
+            while let Ok(value) = rx2.try_recv().map_err(|err| {
+                if err != TryRecvError::Empty {
+                    println!("Task 3: channel: {err}");
+                }
+            }) {
                 tot_data.push(value);
             }
-            
+
             if tot_data.len() == 0 {
                 continue;
             }
 
-            
-            let data_all = symbol_data(&tot_data, &task3_symbols);
-            
+            let data_all = data_from_channel(&tot_data, &task3_symbols);
+
             // process the data with task2
             // we are cold starting the moving average by first collected data of the last 15 minutes
             // and then writing it out
@@ -183,7 +184,7 @@ async fn main() {
                 let file = mav.get_mut(symbol).unwrap();
                 let mav_val = mav_avgs.get_mut(symbol).unwrap();
                 let data = data_all.get(symbol).unwrap();
-                
+
                 if !mav_val.is_full() {
                     mav_val.init_update(data);
                 } else {
@@ -200,10 +201,6 @@ async fn main() {
     });
 
     // await task1 (which is infinite)
-    // This allows the tasks to run, else the main thread would terminate since it has 
-    // no more work to do after spawing the 3 tasks
-    // We could instead spawn 2 tasks and run the first on the main thread
-    // But this should not incur any performance penalty since tokio threads are "green"
-    // so they are not necessarily linked to os threads, and their overhead is very tiny
-    task.await.unwrap();
+    // We spawn tasks 2 and 3 and run the first on the main thread
+    task1(&mut ws_stream, &tx1, &tx2, &mut raw_data, &cli.symbols).await;
 }

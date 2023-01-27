@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 use serde::Serialize;
 use serde_json as json;
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone)]
 pub struct Candlestick {
     init_price: f64,
     last_price: f64,
@@ -15,7 +15,7 @@ pub struct Candlestick {
 }
 
 impl Candlestick {
-    pub fn new(data: &Vec<&json::Value>) -> Option<Candlestick> {
+    pub fn new(data: Vec<json::Value>) -> Option<Candlestick> {
         let tot_vol = data
             .iter()
             .filter_map(|val| val.as_object()?.get("v")?.as_i64())
@@ -29,6 +29,22 @@ impl Candlestick {
         let max_price = prices.iter().cloned().fold(0.0 / 0.0, f64::max);
         let min_price = prices.iter().cloned().fold(0.0 / 0.0, f64::min);
 
+        Some(Candlestick {
+            init_price,
+            last_price,
+            max_price,
+            min_price,
+            tot_vol,
+        })
+    }
+
+    pub fn combine(candlesticks: Vec<Candlestick>) -> Option<Candlestick> {
+        let init_price = candlesticks.first()?.init_price;
+        let last_price = candlesticks.last()?.last_price;
+        let max_price = candlesticks.iter().map(|candlestick| candlestick.max_price).fold(0.0 / 0.0, f64::max);
+        let min_price = candlesticks.iter().map(|candlestick| candlestick.min_price).fold(0.0 / 0.0, f64::min);
+        let tot_vol = candlesticks.iter().map(|candlestick| candlestick.tot_vol).sum();
+        
         Some(Candlestick {
             init_price,
             last_price,

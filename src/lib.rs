@@ -5,11 +5,13 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use candlestick::Candlestick;
 use futures::stream::{iter, StreamExt};
 use futures::SinkExt;
+use mav::MovingAverageData;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::time::{interval_at, Instant, Interval};
+use tokio::time::{interval, interval_at, Instant, Interval};
 use tokio::{fs, net::TcpStream, sync::broadcast::Sender};
 
 use serde_json::{from_str, json, Value};
@@ -18,11 +20,8 @@ use tung::Message;
 use tungstenite as tung;
 use url::Url;
 
-pub fn symbol_data<'a>(
-    total_data: &'a Vec<Value>,
-    symbols: &Vec<String>,
-) -> HashMap<String, Vec<&'a Value>> {
-    let mut data_all: HashMap<String, Vec<&Value>> = HashMap::new();
+pub fn symbol_data(total_data: &Vec<Value>, symbols: &Vec<String>) -> HashMap<String, Vec<Value>> {
+    let mut data_all: HashMap<String, Vec<Value>> = HashMap::new();
     for symbol in symbols {
         data_all.insert(
             symbol.to_string(),
@@ -31,6 +30,28 @@ pub fn symbol_data<'a>(
                 .filter(|val| {
                     val.as_object().unwrap().get("s").unwrap().as_str().unwrap() == symbol
                 })
+                .map(|val| val.to_owned())
+                .collect::<Vec<Value>>(),
+        );
+    }
+    return data_all;
+}
+
+pub fn data_from_channel<T>(
+    total_data: &Vec<(String, T)>,
+    symbols: &Vec<String>,
+) -> HashMap<String, Vec<T>>
+where
+    T: Clone,
+{
+    let mut data_all: HashMap<String, Vec<T>> = HashMap::new();
+    for symbol in symbols {
+        data_all.insert(
+            symbol.to_string(),
+            total_data
+                .iter()
+                .filter(|&val| &val.0 == symbol)
+                .map(|val| val.1.clone())
                 .collect(),
         );
     }
@@ -51,6 +72,7 @@ pub fn print_socket_error(err: tung::Error) {
 
 /**
 Asyncronously syncronously reads from the stream and appends each symbol to a file
+Reads every 100ms
 
 # Arguments
 
@@ -59,33 +81,56 @@ Asyncronously syncronously reads from the stream and appends each symbol to a fi
 */
 pub async fn task1(
     ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-    channel: &Sender<Value>,
+    channel1: &Sender<(String, Candlestick)>,
+    channel2: &Sender<(String, MovingAverageData)>,
     files: &mut HashMap<String, fs::File>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(Ok(msg)) = ws_stream.next().await {
-        if let Value::Object(parsed) = from_str(&msg.into_text()?)? {
+    symbols: &Vec<String>,
+) {
+    let mut limiter = interval(Duration::from_millis(100));
+    while let Some(Ok(msg)) = ws_stream.next().await {
+        limiter.tick().await;
+        let msg_copy = msg.clone();
+        if let Value::Object(parsed) =
+            from_str(&msg.into_text().expect("Can't convert msg into text"))
+                .expect("Can't parse message into JSON")
+        {
             if let Some(Value::Array(data)) = parsed.get("data") {
-                for datum_json in data {
-                    if let Value::Object(datum) = datum_json {
-                        if let Some(Value::String(symbol)) = datum.get("s") {
-                            if let Some(f) = files.get_mut(symbol) {
-                                f.write_all((datum_json.to_owned().to_string() + "\n").as_bytes())
-                                    .await?;
-                                channel.send(datum_json.to_owned())?;
-                                return Ok(());
-                            }
+                // Categorize data by symbol
+                let data_all = symbol_data(data, symbols);
+
+                for symbol in symbols {
+                    if data_all[symbol].len() == 0 {
+                        continue;
+                    }
+                    for datum in &data_all[symbol] {
+                        if let Some(f) = files.get_mut(symbol) {
+                            f.write_all((datum.to_owned().to_string() + "\n").as_bytes())
+                                .await
+                                .expect("Could not write data to file!");
                         }
                     }
+                    let candlestick =
+                        Candlestick::new(data_all[symbol].to_owned()).expect("Bad data");
+                    channel1
+                        .send((symbol.to_owned(), candlestick))
+                        .expect("Could not send candlestick!");
+
+                    let mavdata = MovingAverageData::new(data_all[symbol].to_owned());
+                    channel2
+                        .send((symbol.to_owned(), mavdata))
+                        .expect("Could not send moving average!");
                 }
+            } else {
+                println!("Can't find data in message: {msg_copy}");
             }
+        } else {
+            println!("msg: {:?}", msg_copy);
+            println!("Could not parse JSON into an object!");
         }
     }
-    Ok(())
 }
 
-pub async fn get_socket(
-    token: &str,
-) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, ()> {
+pub async fn get_socket(token: &str) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, ()> {
     let url_string = format!("wss://ws.finnhub.io?token={0}", token);
     let url = Url::parse(&url_string).unwrap();
 
@@ -137,6 +182,7 @@ pub fn minute_interval() -> Interval {
 /// Return time elapsed since start
 pub async fn write_delay(start: Instant, file: &mut File) -> tokio::io::Result<()> {
     let elapsed = start.elapsed();
-    file.write_all((elapsed.as_nanos().to_string() + "\n").as_bytes()).await?;
+    file.write_all((elapsed.as_nanos().to_string() + "\n").as_bytes())
+        .await?;
     Ok(())
 }
