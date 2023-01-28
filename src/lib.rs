@@ -122,8 +122,13 @@ pub async fn task1(
                         .await
                         .expect("Could not send moving average!");
                 }
-            } else {
-                println!("Can't find data in message: {msg_copy}");
+            } else if let Some(Value::String(type_msg)) = parsed.get("type") {
+                if type_msg == "ping" {
+                    continue
+                }
+                else {
+                    println!("Can't find data in message: {msg_copy}");
+                }
             }
         } else {
             println!("msg: {:?}", msg_copy);

@@ -58,37 +58,48 @@ impl MovingAverage {
         self.mav_vals.capacity() == self.mav_vals.len()
     }
 
-    fn price_avg(data: &Vec<MovingAverageData>) -> f64 {
-        let prices_sum: f64 = data
-            .iter()
-            .filter_map(|val| Some(val.mav_avg * val.tot_vol as f64))
-            .sum();
-        prices_sum / (Self::vol_sum(data) as f64)
+    fn price_avg(data: &Vec<MovingAverageData>) -> Option<f64> {
+        if data.len() == 0 {
+            return None;
+        }
+        else {
+            let prices_sum: f64 = data
+                .iter()
+                .filter_map(|val| Some(val.mav_avg * val.tot_vol as f64))
+                .sum();
+            Some(prices_sum / (Self::vol_sum(data)? as f64))
+        }
     }
 
-    fn vol_sum(data: &Vec<MovingAverageData>) -> i64 {
-        data.iter()
+    fn vol_sum(data: &Vec<MovingAverageData>) -> Option<i64> {
+        if data.len() == 0 {
+            return None;
+        }
+        else {
+        Some(data.iter()
             .map(|val| val.tot_vol)
-            .sum()
+            .sum())
+        }
     }
 
-    pub fn init_update(&mut self, data: &Vec<MovingAverageData>) {
-        let new_avg = Self::price_avg(data);
+    pub fn init_update(&mut self, data: &Vec<MovingAverageData>) -> Option<()>{
+        let new_avg = Self::price_avg(data)?;
         self.mav_vals.push_front(new_avg);
 
         self.mav_avg = new_avg;
 
-        self.vols.push_front(Self::vol_sum(data));
+        self.vols.push_front(Self::vol_sum(data)?);
+        Some(())
     }
 
     pub fn update(&mut self, data: &Vec<MovingAverageData>) -> Option<()> {
         let last_val = self.mav_vals.front()?.clone();
-        let new_avg = Self::price_avg(data);
+        let new_avg = Self::price_avg(data)?;
         self.mav_vals.pop_back();
         self.mav_vals.push_front(new_avg);
         self.mav_avg = self.mav_avg + (new_avg - last_val) / self.capacity as f64;
         self.vols.pop_back();
-        self.vols.push_front(Self::vol_sum(data));
+        self.vols.push_front(Self::vol_sum(data)?);
         Some(())
     }
 

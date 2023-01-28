@@ -125,7 +125,7 @@ async fn main() {
             }
 
             if tot_data.len() == 0 {
-                println!("Skipped!");
+                println!("No data received!");
                 continue;
             }
 
@@ -138,11 +138,18 @@ async fn main() {
                 // Time task2
                 let start = Instant::now();
 
-                let new_candlestick =
-                    Candlestick::combine(data.to_owned()).expect("Could not generate candlestick!");
-                new_candlestick.save(file).await.unwrap();
-
-                write_delay(start, &mut delays2).await.unwrap();
+                if let Some(new_candlestick) = Candlestick::combine(data.to_owned()) {
+                    new_candlestick
+                        .save(file)
+                        .await
+                        .expect("Could not write candle data!");
+                    write_delay(start, &mut delays2)
+                        .await
+                        .expect("Could not write delay2 data!");
+                } else {
+                    // no data for this symbol has been received
+                    continue;
+                }
             }
         }
     });
@@ -186,15 +193,21 @@ async fn main() {
                 let data = data_all.get(symbol).unwrap();
 
                 if !mav_val.is_full() {
-                    mav_val.init_update(data);
+                    if let None = mav_val.init_update(data) {
+                        continue; // no data for this symbol has been received
+                    }
                 } else {
                     // Time task3
                     let start = Instant::now();
 
-                    mav_val.update(data);
-                    mav_val.save(file).await.unwrap();
+                    if let None = mav_val.update(data) {
+                        continue; // no data for this symbol has been received
+                    }
+                    mav_val.save(file).await.expect("Could not write mav data!");
 
-                    write_delay(start, &mut delays3).await.unwrap();
+                    write_delay(start, &mut delays3)
+                        .await
+                        .expect("Could not write delay3 data!");
                 }
             }
         }
