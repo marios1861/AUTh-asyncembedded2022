@@ -87,12 +87,10 @@ pub async fn task1(
     symbols: &Vec<String>,
 ) {
     let mut limiter = interval(Duration::from_millis(100));
-    while let Some(Ok(msg)) = ws_stream.next().await {
+    while let Some(Ok(Message::Text(msg))) = ws_stream.next().await {
         limiter.tick().await;
         let msg_copy = msg.clone();
-        if let Value::Object(parsed) =
-            from_str(&msg.into_text().expect("Can't convert msg into text"))
-                .expect("Can't parse message into JSON")
+        if let Ok(Value::Object(parsed)) = from_str(&msg)
         {
             if let Some(Value::Array(data)) = parsed.get("data") {
                 // Categorize data by symbol
@@ -132,7 +130,7 @@ pub async fn task1(
             }
         } else {
             println!("msg: {:?}", msg_copy);
-            println!("Could not parse JSON into an object!");
+            println!("Could not parse msg into a JSON object!");
         }
     }
 }

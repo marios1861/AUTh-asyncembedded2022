@@ -7,6 +7,5 @@ linker = "aarch64-linux-gnu-gcc"
 [target.aarch64-unknown-linux-musl]
 linker = "aarch64-linux-musl-cross/bin/aarch64-linux-musl-ld"
 
-# set this only when building for aarch64-unknown-linux-musl target
 [env]
-CC = "$PWD/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
+CC_aarch64-unknown-linux-musl = "/home/shinydemon/Documents/asyncembedded2022/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
