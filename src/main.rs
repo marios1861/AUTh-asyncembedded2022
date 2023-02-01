@@ -50,7 +50,7 @@ async fn main() {
 
     // file handle options (reate if doesn't exist, truncate to 0 and append)
     let mut data_opts = fs::OpenOptions::new();
-    data_opts.create(true).write(true).truncate(true);
+    data_opts.create(true).append(true);
 
     // create delay file handle for task2 and task3
     let mut delays2 = data_opts
@@ -192,23 +192,23 @@ async fn main() {
                 let mav_val = mav_avgs.get_mut(symbol).unwrap();
                 let data = data_all.get(symbol).unwrap();
 
+                // Time task3
+                let start = Instant::now();
                 if !mav_val.is_full() {
                     if let None = mav_val.init_update(data) {
                         continue; // no data for this symbol has been received
                     }
                 } else {
-                    // Time task3
-                    let start = Instant::now();
-
                     if let None = mav_val.update(data) {
                         continue; // no data for this symbol has been received
                     }
-                    mav_val.save(file).await.expect("Could not write mav data!");
-
-                    write_delay(start, &mut delays3)
-                        .await
-                        .expect("Could not write delay3 data!");
                 }
+
+                mav_val.save(file).await.expect("Could not write mav data!");
+
+                write_delay(start, &mut delays3)
+                    .await
+                    .expect("Could not write delay3 data!");
             }
         }
     });
