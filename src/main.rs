@@ -32,14 +32,6 @@ async fn main() {
     // Parse commandline args
     let cli = Cli::parse();
 
-    // Get socket
-    let mut ws_stream = get_socket(&cli.token).await.unwrap();
-
-    // Subscribe to each given symbol
-    subscribe_to_symbols(&cli.symbols, &mut ws_stream)
-        .await
-        .unwrap();
-
     // Create data folder (if it doesn't already exist)
     let data_folder = Path::new("./data");
     fs::create_dir_all(data_folder).await.unwrap();
@@ -102,13 +94,27 @@ async fn main() {
         Sender<(String, MovingAverageData)>,
         Receiver<(String, MovingAverageData)>,
     ) = mpsc::channel(600);
-
+    let task2_symbols = cli.symbols.clone();
+    let task3_symbols = cli.symbols.clone();
     // Create tokio tasks for each task of the application
+    let program = tokio::spawn(async move {
+        loop {
+            // Get socket
+            let mut ws_stream = get_socket(&cli.token).await.unwrap();
+
+            // Subscribe to each given symbol
+            subscribe_to_symbols(&cli.symbols, &mut ws_stream)
+                .await
+                .unwrap();
+
+            task1(&mut ws_stream, &tx1, &tx2, &mut raw_data, &cli.symbols).await;
+        }
+    });
     // two tasks are automatically scheduled to execute at
     // the soonest possible moment from the interval tick
 
     // Candlestick generator task (task2)
-    let task2_symbols = cli.symbols.clone();
+    
     tokio::spawn(async move {
         loop {
             interval1.tick().await;
@@ -155,7 +161,6 @@ async fn main() {
     });
 
     // create a moving average queue with a 15 values memory
-    let task3_symbols = cli.symbols.clone();
     let mut mav_avgs: HashMap<String, MovingAverage> = HashMap::new();
     for symbol in &task3_symbols {
         mav_avgs.insert(symbol.to_string(), MovingAverage::new(15));
@@ -215,5 +220,5 @@ async fn main() {
 
     // await task1 (which is infinite)
     // We spawn tasks 2 and 3 and run the first on the main thread
-    task1(&mut ws_stream, &tx1, &tx2, &mut raw_data, &cli.symbols).await;
+    program.await.unwrap()
 }

@@ -87,61 +87,53 @@ pub async fn task1(
     symbols: &Vec<String>,
 ) {
     let mut limiter = interval(Duration::from_millis(100));
-    loop {
-        match ws_stream.next().await {
-            Some(Ok(msg)) => {
-                limiter.tick().await;
-                let msg_copy = msg.clone();
-                if let Message::Text(msg) = msg {
-                    if let Ok(Value::Object(parsed)) = from_str(&msg) {
-                        if let Some(Value::Array(data)) = parsed.get("data") {
-                            // Categorize data by symbol
-                            let data_all = symbol_data(data, symbols);
+    while let Some(Ok(msg)) = ws_stream.next().await {
+        limiter.tick().await;
+        let msg_copy = msg.clone();
+        if let Message::Text(msg) = msg {
+            if let Ok(Value::Object(parsed)) = from_str(&msg) {
+                if let Some(Value::Array(data)) = parsed.get("data") {
+                    // Categorize data by symbol
+                    let data_all = symbol_data(data, symbols);
 
-                            for symbol in symbols {
-                                if data_all[symbol].len() == 0 {
-                                    continue;
-                                }
-                                for datum in &data_all[symbol] {
-                                    if let Some(f) = files.get_mut(symbol) {
-                                        f.write_all(
-                                            (datum.to_owned().to_string() + "\n").as_bytes(),
-                                        )
-                                        .await
-                                        .expect("Could not write data to file!");
-                                    }
-                                }
-                                let candlestick = Candlestick::new(data_all[symbol].to_owned())
-                                    .expect("Bad data");
-                                channel1
-                                    .send((symbol.to_owned(), candlestick))
+                    for symbol in symbols {
+                        if data_all[symbol].len() == 0 {
+                            continue;
+                        }
+                        for datum in &data_all[symbol] {
+                            if let Some(f) = files.get_mut(symbol) {
+                                f.write_all((datum.to_owned().to_string() + "\n").as_bytes())
                                     .await
-                                    .expect("Could not send candlestick!");
-
-                                let mavdata = MovingAverageData::new(data_all[symbol].to_owned());
-                                channel2
-                                    .send((symbol.to_owned(), mavdata))
-                                    .await
-                                    .expect("Could not send moving average!");
-                            }
-                        } else if let Some(Value::String(type_msg)) = parsed.get("type") {
-                            if type_msg == "ping" {
-                                continue;
-                            } else {
-                                println!("Can't find data in message: {msg_copy}");
+                                    .expect("Could not write data to file!");
                             }
                         }
-                    } else {
-                        println!("msg: {:?}", msg_copy);
-                        println!("Could not parse msg into a JSON object!");
+                        let candlestick =
+                            Candlestick::new(data_all[symbol].to_owned()).expect("Bad data");
+                        channel1
+                            .send((symbol.to_owned(), candlestick))
+                            .await
+                            .expect("Could not send candlestick!");
+
+                        let mavdata = MovingAverageData::new(data_all[symbol].to_owned());
+                        channel2
+                            .send((symbol.to_owned(), mavdata))
+                            .await
+                            .expect("Could not send moving average!");
                     }
-                } else {
-                    println!("msg: {:?}", msg_copy);
-                    println!("Could not convert msg into a string!");
+                } else if let Some(Value::String(type_msg)) = parsed.get("type") {
+                    if type_msg == "ping" {
+                        continue;
+                    } else {
+                        println!("Can't find data in message: {msg_copy}");
+                    }
                 }
-            },
-            Some(Err(e)) => println!("Error: {e} received!"),
-            None => println!("None received!!!!!!!")
+            } else {
+                println!("msg: {:?}", msg_copy);
+                println!("Could not parse msg into a JSON object!");
+            }
+        } else {
+            println!("msg: {:?}", msg_copy);
+            println!("Could not convert msg into a string!");
         }
     }
 }
